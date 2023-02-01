@@ -1,4 +1,5 @@
 import { load } from '@loaders.gl/core';
+import {LASLoader} from '@loaders.gl/las';
 import { CesiumIonLoader, Tiles3DLoader } from '@loaders.gl/3d-tiles';
 import { Tileset3D, TILE_TYPE, TILE_CONTENT_STATE } from '@loaders.gl/tiles';
 import { CullingVolume, Plane } from '@math.gl/culling';
@@ -29,9 +30,12 @@ import {
   Euler
 } from 'three';
 
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
-import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js';
+
+
+
+// import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+// import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
+// import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js';
 
 import { Gradients } from './gradients';
 
@@ -57,7 +61,7 @@ const defaultOptions: LoaderOptions = {
   updateTransforms: true,
   shading: Shading.FlatTexture,
   transparent: false,
-  pointCloudColoring: PointCloudColoring.White,
+  pointCloudColoring: PointCloudColoring.Classification,
   pointSize: 1.0,
   worker: true,
   wireframe: false,
@@ -70,6 +74,162 @@ const defaultOptions: LoaderOptions = {
   geoTransform: GeoTransform.Reset,
   preloadTilesCount: null
 };
+
+class LoaderLAS {
+  public static async load (props: LoaderProps): Promise<{model: Object3D}> {
+    const options = { ...defaultOptions, ...props.options };
+    const { url } = props;
+
+    const UPDATE_INTERVAL = options.updateInterval;
+    const MAX_DEPTH_FOR_ORIENTATION = 5;
+
+    const loadersGLOptions: {[key: string]: unknown} = {};
+
+    if (props.loadingManager) {
+      props.loadingManager.itemStart(url);
+    }
+
+    const data = await load(url, LASLoader, {
+      ...loadersGLOptions,
+    });
+    //console.log("Pointcloud data:");
+    //console.log(data);
+
+    
+    const renderMap = {};
+    const boxMap = {};
+    const unloadQueue = [];
+    const root = new Group();
+    //root.add(data);
+    //console.log(root);
+    const pointcloudUniforms = {
+      pointSize: { type: 'f', value: options.pointSize },
+      gradient: { type: 't', value: gradientTexture },
+      grayscale: { type: 't', value: grayscaleTexture },
+      rootCenter: { type: 'vec3', value: new Vector3() },
+      rootNormal: { type: 'vec3', value: new Vector3() },
+      coloring: { type: 'i', value: options.pointCloudColoring },
+      hideGround: { type: 'b', value: true },
+      elevationRange: { type: 'vec2', value: new Vector2(0, 400) },
+      maxIntensity: { type: 'f', value: 1.0 },
+      intensityContrast: { type: 'f', value: 1.0 },
+      alpha: { type: 'f', value: 1.0 },
+    };
+
+    const pointcloudMaterial = new ShaderMaterial({
+      uniforms: pointcloudUniforms,
+      vertexShader: PointCloudVS,
+      fragmentShader: PointCloudFS,
+      transparent: options.transparent,
+      vertexColors: true
+    });
+    
+    let cameraReference = null;
+    let rendererReference = null;
+
+    const unlitMaterial = new MeshBasicMaterial({transparent: options.transparent});
+    let timer = 0;
+
+    return data;
+      
+      // runtime: {
+      //   getTileset: () => {
+      //     return data;
+      //   //   return tileset;
+      //   },
+      //   getStats: () => {
+      //     return null;
+      //   //   return tileset.stats;
+      //   },
+      //   showTiles: (visible) => {
+      //   //   tileBoxes.visible = visible;
+      //   },
+      //   setWireframe: (wireframe) => {
+      //     options.wireframe = wireframe;
+      //     root.traverse((object) => {
+      //       if (object instanceof Mesh) {
+      //         object.material.wireframe = wireframe;
+      //       }
+      //     });
+      //   },
+      //   setDebug: (debug) => {
+      //     options.debug = debug;
+      //   },
+      //   setShading: (shading) => {
+      //     options.shading = shading;
+      //   },
+      //   getTileBoxes: () => {
+      //     return null;
+      //   },
+      //   setViewDistanceScale: (scale) => {
+      //   //   tileset.options.viewDistanceScale = scale;
+      //   //   tileset._frameNumber++;
+      //   //   tilesetUpdate(tileset, renderMap, rendererReference, cameraReference);
+      //   },
+      //   setHideGround: (enabled) => {
+      //     pointcloudUniforms.hideGround.value = enabled;
+      //   },
+      //   setPointCloudColoring: (selection) => {
+      //     pointcloudUniforms.coloring.value = selection;
+      //   },
+      //   setElevationRange: (range) => {
+      //     pointcloudUniforms.elevationRange.value.set(range[0], range[1]);
+      //   },
+      //   setMaxIntensity: (intensity) => {
+      //     pointcloudUniforms.maxIntensity.value = intensity;
+      //   },
+      //   setIntensityContrast: (contrast) => {
+      //     pointcloudUniforms.intensityContrast.value = contrast;
+      //   },
+      //   setPointAlpha: (alpha) => {
+      //     pointcloudUniforms.alpha.value = alpha;
+      //   },
+      //   getLatLongHeightFromPosition: (position) => {
+      //   //   const cartographicPosition = tileset.ellipsoid.cartesianToCartographic(
+      //   //     new Vector3().copy(position).applyMatrix4(new Matrix4().copy(threeMat).invert()).toArray(),
+      //   //   );
+      //   //   return {
+      //   //     lat: cartographicPosition[1],
+      //   //     long: cartographicPosition[0],
+      //   //     height: cartographicPosition[2],
+      //   //   };
+      //   return null;
+      //   },
+      //   getPositionFromLatLongHeight: (coord) => {
+      //   //   const cartesianPosition = tileset.ellipsoid.cartographicToCartesian([coord.long, coord.lat, coord.height]);
+      //   //   return new Vector3(...cartesianPosition).applyMatrix4(threeMat);
+      //   return null;
+      //   },
+      //   getCameraFrustum: (camera: Camera) => {
+      //     const frustum = Util.getCameraFrustum(camera);
+      //     const meshes = frustum.planes
+      //       .map((plane) => new Plane(plane.normal.toArray(), plane.constant))
+      //       .map((loadersPlane) => Util.loadersPlaneToMesh(loadersPlane));
+
+      //     const model = new Group();
+      //     for (const mesh of meshes) model.add(mesh);
+
+      //     return model;
+      //   },
+      //   update: function (dt: number, renderer: WebGLRenderer, camera: Camera) {
+      //     cameraReference = camera;
+      //     rendererReference = renderer;
+
+      //     timer += dt;
+      //   },
+      //   dispose: function () {
+      //     // disposeFlag = true;
+      //     // tileset._destroy();
+      //     while (root.children.length > 0) {
+      //       const obj = root.children[0];
+      //       disposeNode(obj);
+      //       root.remove(obj);
+      //     }
+      //   },
+      // },
+    //};
+  }
+}
 
 /** 3D Tiles Loader */
 class Loader3DTiles {
@@ -116,7 +276,7 @@ class Loader3DTiles {
       tileBoxes.visible = false;
     } else {
       // TODO: Need to have a parent root with no transform and then a conent root with transform
-      //root.add(tileBoxes)
+      root.add(tileBoxes)
     }
 
     const pointcloudUniforms = {
@@ -144,322 +304,324 @@ class Loader3DTiles {
     let cameraReference = null;
     let rendererReference = null;
 
-    const gltfLoader = new GLTFLoader();
+    //const gltfLoader = new GLTFLoader();
 
-    let ktx2Loader = undefined;
-    let dracoLoader = undefined;
+    const ktx2Loader = undefined;
+    const dracoLoader = undefined;
 
-    if (options.basisTranscoderPath) {
-      ktx2Loader = new KTX2Loader();
-      ktx2Loader.detectSupport(props.renderer);
-      ktx2Loader.setTranscoderPath(options.basisTranscoderPath + '/');
-      ktx2Loader.setWorkerLimit(1);
+    // if (options.basisTranscoderPath) {
+    //   ktx2Loader = new KTX2Loader();
+    //   ktx2Loader.detectSupport(props.renderer);
+    //   ktx2Loader.setTranscoderPath(options.basisTranscoderPath + '/');
+    //   ktx2Loader.setWorkerLimit(1);
 
-      gltfLoader.setKTX2Loader(ktx2Loader);
-    }
+    //   gltfLoader.setKTX2Loader(ktx2Loader);
+    // }
 
-    if (options.dracoDecoderPath) {
-      dracoLoader = new DRACOLoader();
-      dracoLoader.setDecoderPath(options.dracoDecoderPath + '/');
-      dracoLoader.setWorkerLimit(options.maxConcurrency);
-      gltfLoader.setDRACOLoader(dracoLoader);
-    }
+    // if (options.dracoDecoderPath) {
+    //   dracoLoader = new DRACOLoader();
+    //   dracoLoader.setDecoderPath(options.dracoDecoderPath + '/');
+    //   dracoLoader.setWorkerLimit(options.maxConcurrency);
+    //   gltfLoader.setDRACOLoader(dracoLoader);
+    // }
 
     const unlitMaterial = new MeshBasicMaterial({transparent: options.transparent});
 
-    const tileOptions = {
-      maximumMemoryUsage: options.maximumMemoryUsage,
-      maximumScreenSpaceError: options.maximumScreenSpaceError,
-      viewDistanceScale: options.viewDistanceScale,
-      skipLevelOfDetail: options.skipLevelOfDetail,
-      updateTransforms: options.updateTransforms,
-      throttleRequests: options.throttleRequests,
-      maxRequests: options.maxRequests,
-      contentLoader: async (tile) => {
-        let tileContent = null;
-        switch (tile.type) {
-          case TILE_TYPE.POINTCLOUD: {
-            tileContent = createPointNodes(tile, pointcloudMaterial, options, rootTransformInverse);
-            break;
-          }
-          case TILE_TYPE.SCENEGRAPH:
-          case TILE_TYPE.MESH: {
-            tileContent = await createGLTFNodes(gltfLoader, tile, unlitMaterial, options, rootTransformInverse);
-            break;
-          }
-          default:
-            break;
-        }
-        if (tileContent) {
-          tileContent.visible = false;
-          renderMap[tile.id] = tileContent;
-          root.add(renderMap[tile.id]);
-          if (options.debug) {
-            const box = Util.loadersBoundingBoxToMesh(tile);
-            tileBoxes.add(box);
-            boxMap[tile.id] = box;
-          }
-        }
-      },
-      onTileLoad: async (tile) => {
-        if (tileset) {
-          if (!orientationDetected && tile?.depth <= MAX_DEPTH_FOR_ORIENTATION) {
-            detectOrientation(tile);
-          }
-          tileset._frameNumber++;
-          tilesetUpdate(tileset, renderMap, rendererReference, cameraReference);
-        }
-      },
-      onTileUnload: (tile) => {
-        unloadQueue.push(tile);
-      },
-      onTileError: (tile, message) => {
-        console.error('Tile error', tile.id, message);
-      },
-    };
-    const tileset = new Tileset3D(tilesetJson, {
-      ...tileOptions,
-      loadOptions: {
-        ...loadersGLOptions,
-        maxConcurrency: options.maxConcurrency,
-        worker: options.worker,
-        gltf: {
-          loadImages: false,
-        },
-        '3d-tiles': {
-          loadGLTF: false
-        },
-      },
-    });
-    //
-    // transformations
-    const threeMat = new Matrix4();
-    const tileTrasnform = new Matrix4();
-    const rootCenter = new Vector3();
-    let orientationDetected = false;
+    // const tileOptions = {
+    //   maximumMemoryUsage: options.maximumMemoryUsage,
+    //   maximumScreenSpaceError: options.maximumScreenSpaceError,
+    //   viewDistanceScale: options.viewDistanceScale,
+    //   skipLevelOfDetail: options.skipLevelOfDetail,
+    //   updateTransforms: options.updateTransforms,
+    //   throttleRequests: options.throttleRequests,
+    //   maxRequests: options.maxRequests,
+    //   contentLoader: async (tile) => {
+    //     let tileContent = null;
+    //     switch (tile.type) {
+    //       case TILE_TYPE.POINTCLOUD: {
+    //         tileContent = createPointNodes(tile, pointcloudMaterial, options, rootTransformInverse);
+    //         break;
+    //       }
+    //       case TILE_TYPE.SCENEGRAPH:
+    //       case TILE_TYPE.MESH: {
+    //         //tileContent = await createGLTFNodes(gltfLoader, tile, unlitMaterial, options, rootTransformInverse);
+    //         break;
+    //       }
+    //       default:
+    //         break;
+    //     }
+    //     if (tileContent) {
+    //       tileContent.visible = false;
+    //       renderMap[tile.id] = tileContent;
+    //       root.add(renderMap[tile.id]);
+    //       if (options.debug) {
+    //         const box = Util.loadersBoundingBoxToMesh(tile);
+    //         tileBoxes.add(box);
+    //         boxMap[tile.id] = box;
+    //       }
+    //     }
+    //   },
+    //   onTileLoad: async (tile) => {
+    //     if (tileset) {
+    //       if (!orientationDetected && tile?.depth <= MAX_DEPTH_FOR_ORIENTATION) {
+    //         detectOrientation(tile);
+    //       }
+    //       tileset._frameNumber++;
+    //       tilesetUpdate(tileset, renderMap, rendererReference, cameraReference);
+    //     }
+    //   },
+    //   onTileUnload: (tile) => {
+    //     unloadQueue.push(tile);
+    //   },
+    //   onTileError: (tile, message) => {
+    //     console.error('Tile error', tile.id, message);
+    //   },
+    // };
+    // const tileset = new Tileset3D(tilesetJson, {
+    //   ...tileOptions,
+    //   loadOptions: {
+    //     ...loadersGLOptions,
+    //     maxConcurrency: options.maxConcurrency,
+    //     worker: options.worker,
+    //     gltf: {
+    //       loadImages: false,
+    //     },
+    //     '3d-tiles': {
+    //       loadGLTF: false
+    //     },
+    //   },
+    // });
+    // //
+    // // transformations
+    // const threeMat = new Matrix4();
+    // const tileTrasnform = new Matrix4();
+    // const rootCenter = new Vector3();
+    // let orientationDetected = false;
 
-    if (tileset.root.boundingVolume) {
-      if (tileset.root.header.boundingVolume.region) {
-        // TODO: Handle region type bounding volumes
-        // https://github.com/visgl/loaders.gl/issues/1994
-        console.warn("Cannot apply a model matrix to bounding volumes of type region. Tileset stays in original geo-coordinates.")
-        options.geoTransform = GeoTransform.WGS84Cartesian;
-      }
-      tileTrasnform.setPosition(
-        tileset.root.boundingVolume.center[0],
-        tileset.root.boundingVolume.center[1],
-        tileset.root.boundingVolume.center[2]
-      )
-    } else {
-      console.warn("Bounding volume not found, no transformations applied")
-    }
+    // if (tileset.root.boundingVolume) {
+    //   if (tileset.root.header.boundingVolume.region) {
+    //     // TODO: Handle region type bounding volumes
+    //     // https://github.com/visgl/loaders.gl/issues/1994
+    //     console.warn("Cannot apply a model matrix to bounding volumes of type region. Tileset stays in original geo-coordinates.")
+    //     options.geoTransform = GeoTransform.WGS84Cartesian;
+    //   }
+    //   tileTrasnform.setPosition(
+    //     tileset.root.boundingVolume.center[0],
+    //     tileset.root.boundingVolume.center[1],
+    //     tileset.root.boundingVolume.center[2]
+    //   )
+    // } else {
+    //   console.warn("Bounding volume not found, no transformations applied")
+    // }
 
-    if (options.debug) {
-      const box = Util.loadersBoundingBoxToMesh(tileset.root);
-      tileBoxes.add(box);
-      boxMap[tileset.root.id] = box;
-    }
+    // if (options.debug) {
+    //   const box = Util.loadersBoundingBoxToMesh(tileset.root);
+    //   tileBoxes.add(box);
+    //   boxMap[tileset.root.id] = box;
+    // }
 
-    let disposeFlag = false;
-    let loadingEnded = false;
+    // let disposeFlag = false;
+    // let loadingEnded = false;
 
 
-    pointcloudUniforms.rootCenter.value.copy(rootCenter);
-    pointcloudUniforms.rootNormal.value.copy(new Vector3(0, 0, 1).normalize());
+    // pointcloudUniforms.rootCenter.value.copy(rootCenter);
+    // pointcloudUniforms.rootNormal.value.copy(new Vector3(0, 0, 1).normalize());
 
-    // Extra stats
-    tileset.stats.get('Loader concurrency').count = options.maxConcurrency
+    // // Extra stats
+    // tileset.stats.get('Loader concurrency').count = options.maxConcurrency
 
-    tileset.stats.get('Maximum SSE').count = options.maximumScreenSpaceError;
+    // tileset.stats.get('Maximum SSE').count = options.maximumScreenSpaceError;
 
-    tileset.stats.get('Maximum mem usage').count = options.maximumMemoryUsage;
+    // tileset.stats.get('Maximum mem usage').count = options.maximumMemoryUsage;
 
-    let timer = 0;
+     let timer = 0;
 
-    let lastCameraTransform: Matrix4 = null;
-    let lastCameraAspect = null;
-    const lastCameraPosition = new Vector3(Infinity, Infinity, Infinity);
-    let sseDenominator = null;
+    // let lastCameraTransform: Matrix4 = null;
+    // let lastCameraAspect = null;
+    // const lastCameraPosition = new Vector3(Infinity, Infinity, Infinity);
+    // let sseDenominator = null;
 
-    root.updateMatrixWorld(true);
-    const lastRootTransform:Matrix4 = new Matrix4().copy(root.matrixWorld)
-    const rootTransformInverse = new Matrix4().copy(lastRootTransform).invert();
+    // root.updateMatrixWorld(true);
+    // const lastRootTransform:Matrix4 = new Matrix4().copy(root.matrixWorld)
+    // const rootTransformInverse = new Matrix4().copy(lastRootTransform).invert();
 
-    detectOrientation(tileset.root);
-    updateResetTransform();
+    // detectOrientation(tileset.root);
+    // updateResetTransform();
 
-    if (options.debug) {
-      boxMap[tileset.root.id].applyMatrix4(threeMat);
-      tileBoxes.matrixWorld.copy(root.matrixWorld);
-    }
+    // if (options.debug) {
+    //   boxMap[tileset.root.id].applyMatrix4(threeMat);
+    //   tileBoxes.matrixWorld.copy(root.matrixWorld);
+    // }
 
-    if (options.geoTransform == GeoTransform.Mercator) {
-      const coords = Util.datumsToSpherical(
-        tileset.cartographicCenter[1],
-        tileset.cartographicCenter[0]
-      )
-      rootCenter.set(
-       coords.x,
-       0,
-       -coords.y
-      );
+    // if (options.geoTransform == GeoTransform.Mercator) {
+    //   const coords = Util.datumsToSpherical(
+    //     tileset.cartographicCenter[1],
+    //     tileset.cartographicCenter[0]
+    //   )
+    //   rootCenter.set(
+    //    coords.x,
+    //    0,
+    //    -coords.y
+    //   );
 
-      root.position.copy(rootCenter);
-      root.rotation.set(-Math.PI / 2, 0, 0);
+    //   root.position.copy(rootCenter);
+    //   root.rotation.set(-Math.PI / 2, 0, 0);
 
-      root.updateMatrixWorld(true);
+    //   root.updateMatrixWorld(true);
 
-    } else if (options.geoTransform == GeoTransform.WGS84Cartesian) {
-      root.applyMatrix4(tileTrasnform);
-      root.updateMatrixWorld(true);
-      rootCenter.copy(root.position);
-    }
+    // } else if (options.geoTransform == GeoTransform.WGS84Cartesian) {
+    //   root.applyMatrix4(tileTrasnform);
+    //   root.updateMatrixWorld(true);
+    //   rootCenter.copy(root.position);
+    // }
 
-    function detectOrientation(tile) {
-      if (!tile.boundingVolume.halfAxes) {
-        return;
-      }
-      const halfAxes = tile.boundingVolume.halfAxes;
-      const orientationMatrix = new Matrix4()
-      .extractRotation(Util.getMatrix4FromHalfAxes(halfAxes))
-      .premultiply(new Matrix4().extractRotation(rootTransformInverse));
+    // function detectOrientation(tile) {
+    //   if (!tile.boundingVolume.halfAxes) {
+    //     return;
+    //   }
+    //   const halfAxes = tile.boundingVolume.halfAxes;
+    //   const orientationMatrix = new Matrix4()
+    //   .extractRotation(Util.getMatrix4FromHalfAxes(halfAxes))
+    //   .premultiply(new Matrix4().extractRotation(rootTransformInverse));
 
-      const rotation = new Euler().setFromRotationMatrix(orientationMatrix);
+    //   const rotation = new Euler().setFromRotationMatrix(orientationMatrix);
 
-      if (!rotation.equals(new Euler())) {
-        orientationDetected = true;
-        const pos = new Vector3(
-          tileTrasnform.elements[12], 
-          tileTrasnform.elements[13], 
-          tileTrasnform.elements[14])
-        ;
-        tileTrasnform.extractRotation(orientationMatrix);
-        tileTrasnform.setPosition(pos);
-        updateResetTransform();
-      } 
-    }
+    //   if (!rotation.equals(new Euler())) {
+    //     orientationDetected = true;
+    //     const pos = new Vector3(
+    //       tileTrasnform.elements[12], 
+    //       tileTrasnform.elements[13], 
+    //       tileTrasnform.elements[14])
+    //     ;
+    //     tileTrasnform.extractRotation(orientationMatrix);
+    //     tileTrasnform.setPosition(pos);
+    //     updateResetTransform();
+    //   } 
+    // }
 
-    function updateResetTransform() {
-      if (options.geoTransform != GeoTransform.WGS84Cartesian) {
-        // Reset the current model matrix and apply our own transformation
-        threeMat.copy(tileTrasnform).invert();
-        threeMat.premultiply(lastRootTransform);
+    // function updateResetTransform() {
+    //   if (options.geoTransform != GeoTransform.WGS84Cartesian) {
+    //     // Reset the current model matrix and apply our own transformation
+    //     threeMat.copy(tileTrasnform).invert();
+    //     threeMat.premultiply(lastRootTransform);
       
-        threeMat.copy(lastRootTransform).multiply(new Matrix4().copy(tileTrasnform).invert());
+    //     threeMat.copy(lastRootTransform).multiply(new Matrix4().copy(tileTrasnform).invert());
 
-        tileset.modelMatrix = new MathGLMatrix4(threeMat.toArray());
-      }
-    }
+    //     tileset.modelMatrix = new MathGLMatrix4(threeMat.toArray());
+    //   }
+    // }
 
-    function tilesetUpdate(tileset, renderMap, renderer, camera) {
-      if (disposeFlag) {
-        return;
-      }
+    // function tilesetUpdate(tileset, renderMap, renderer, camera) {
+    //   if (disposeFlag) {
+    //     return;
+    //   }
 
-      // Assumes camera fov, near and far are not changing
-      if (!sseDenominator || camera.aspect != lastCameraAspect) {
-        const loadersFrustum = new PerspectiveFrustum({
-          fov: (camera.fov / 180) * Math.PI,
-          aspectRatio: camera.aspect,
-          near: camera.near,
-          far: camera.far,
-        });
+    //   // Assumes camera fov, near and far are not changing
+    //   if (!sseDenominator || camera.aspect != lastCameraAspect) {
+    //     const loadersFrustum = new PerspectiveFrustum({
+    //       fov: (camera.fov / 180) * Math.PI,
+    //       aspectRatio: camera.aspect,
+    //       near: camera.near,
+    //       far: camera.far,
+    //     });
 
-        sseDenominator = loadersFrustum.sseDenominator;
-        lastCameraAspect = camera.aspect;
+    //     sseDenominator = loadersFrustum.sseDenominator;
+    //     lastCameraAspect = camera.aspect;
 
-        if (options.debug) {
-          console.log('Updated sse denonimator:', sseDenominator);
-        }
-      }
+    //     if (options.debug) {
+    //       console.log('Updated sse denonimator:', sseDenominator);
+    //     }
+    //   }
 
-      const frustum = Util.getCameraFrustum(camera);
-      const planes = frustum.planes.map((plane) => new Plane(plane.normal.toArray(), plane.constant));
-      const cullingVolume = new CullingVolume(planes);
+    //   const frustum = Util.getCameraFrustum(camera);
+    //   const planes = frustum.planes.map((plane) => new Plane(plane.normal.toArray(), plane.constant));
+    //   const cullingVolume = new CullingVolume(planes);
 
-      const rendererSize = new Vector2();
-      renderer.getSize(rendererSize);
+    //   const rendererSize = new Vector2();
+    //   renderer.getSize(rendererSize);
 
-      const frameState = {
-        camera: {
-          position: lastCameraPosition.toArray(),
-        },
+    //   const frameState = {
+    //     camera: {
+    //       position: lastCameraPosition.toArray(),
+    //     },
 
-        height: rendererSize.y,
-        frameNumber: tileset._frameNumber,
-        sseDenominator: sseDenominator,
-        cullingVolume: cullingVolume,
-        viewport: {
-          id: 0,
-        },
-      };
+    //     height: rendererSize.y,
+    //     frameNumber: tileset._frameNumber,
+    //     sseDenominator: sseDenominator,
+    //     cullingVolume: cullingVolume,
+    //     viewport: {
+    //       id: 0,
+    //     },
+    //   };
 
-      tileset._cache.reset();
-      tileset._traverser.traverse(tileset.root, frameState, tileset.options);
+    //   tileset._cache.reset();
+    //   tileset._traverser.traverse(tileset.root, frameState, tileset.options);
 
-      for (const tile of tileset.tiles) {
-        if (tile.selected) {
-          if (!renderMap[tile.id]) {
-            console.error('TILE SELECTED BUT NOT LOADED!!', tile.id);
-          } else {
-            // Make sure it's visible
-            renderMap[tile.id].visible = true;
-          }
-        } else {
-          if (renderMap[tile.id]) {
-            renderMap[tile.id].visible = false;
-          }
-        }
-      }
-      while (unloadQueue.length > 0) {
-        const tile = unloadQueue.pop();
-        if (renderMap[tile.id] && tile.contentState == TILE_CONTENT_STATE.UNLOADED) {
-          root.remove(renderMap[tile.id]);
-          disposeNode(renderMap[tile.id]);
-          delete renderMap[tile.id];
-        }
-        if (boxMap[tile.id]) {
-          disposeNode(boxMap[tile.id]);
-          tileBoxes.remove(boxMap[tile.id]);
-          delete boxMap[tile.id];
-        }
-      }
+    //   for (const tile of tileset.tiles) {
+    //     if (tile.selected) {
+    //       if (!renderMap[tile.id]) {
+    //         console.error('TILE SELECTED BUT NOT LOADED!!', tile.id);
+    //       } else {
+    //         // Make sure it's visible
+    //         renderMap[tile.id].visible = true;
+    //       }
+    //     } else {
+    //       if (renderMap[tile.id]) {
+    //         renderMap[tile.id].visible = false;
+    //       }
+    //     }
+    //   }
+    //   while (unloadQueue.length > 0) {
+    //     const tile = unloadQueue.pop();
+    //     if (renderMap[tile.id] && tile.contentState == TILE_CONTENT_STATE.UNLOADED) {
+    //       root.remove(renderMap[tile.id]);
+    //       disposeNode(renderMap[tile.id]);
+    //       delete renderMap[tile.id];
+    //     }
+    //     if (boxMap[tile.id]) {
+    //       disposeNode(boxMap[tile.id]);
+    //       tileBoxes.remove(boxMap[tile.id]);
+    //       delete boxMap[tile.id];
+    //     }
+    //   }
 
-      const tilesLoaded = tileset.stats.get('Tiles Loaded').count;
-      const tilesLoading = tileset.stats.get('Tiles Loading').count;
+    //   const tilesLoaded = tileset.stats.get('Tiles Loaded').count;
+    //   const tilesLoading = tileset.stats.get('Tiles Loading').count;
 
-      if (props.onProgress) {
-        props.onProgress(
-          tilesLoaded,
-          tilesLoaded + tilesLoading
-        );
-      }
+    //   if (props.onProgress) {
+    //     props.onProgress(
+    //       tilesLoaded,
+    //       tilesLoaded + tilesLoading
+    //     );
+    //   }
 
-      if (props.loadingManager && !loadingEnded) {
-        if (tilesLoading == 0 && 
-           (
-            options.preloadTilesCount == null ||
-            tilesLoaded >= options.preloadTilesCount)
-           ) {
-             loadingEnded = true;
-             props.loadingManager.itemEnd(props.url);
-           }
-      }
+    //   if (props.loadingManager && !loadingEnded) {
+    //     if (tilesLoading == 0 && 
+    //        (
+    //         options.preloadTilesCount == null ||
+    //         tilesLoaded >= options.preloadTilesCount)
+    //        ) {
+    //          loadingEnded = true;
+    //          props.loadingManager.itemEnd(props.url);
+    //        }
+    //   }
 
-      return frameState;
-    }
+    //   return frameState;
+    // }
 
     return {
       model: root,
       runtime: {
         getTileset: () => {
-          return tileset;
+          return null;
+        //   return tileset;
         },
         getStats: () => {
-          return tileset.stats;
+          return null;
+        //   return tileset.stats;
         },
         showTiles: (visible) => {
-          tileBoxes.visible = visible;
+        //   tileBoxes.visible = visible;
         },
         setWireframe: (wireframe) => {
           options.wireframe = wireframe;
@@ -480,9 +642,9 @@ class Loader3DTiles {
           return tileBoxes;
         },
         setViewDistanceScale: (scale) => {
-          tileset.options.viewDistanceScale = scale;
-          tileset._frameNumber++;
-          tilesetUpdate(tileset, renderMap, rendererReference, cameraReference);
+        //   tileset.options.viewDistanceScale = scale;
+        //   tileset._frameNumber++;
+        //   tilesetUpdate(tileset, renderMap, rendererReference, cameraReference);
         },
         setHideGround: (enabled) => {
           pointcloudUniforms.hideGround.value = enabled;
@@ -491,7 +653,7 @@ class Loader3DTiles {
           pointcloudUniforms.coloring.value = selection;
         },
         setElevationRange: (range) => {
-          pointcloudUniforms.elevationRange.value.set(range[0], range[1]);
+        //   pointcloudUniforms.elevationRange.value.set(range[0], range[1]);
         },
         setMaxIntensity: (intensity) => {
           pointcloudUniforms.maxIntensity.value = intensity;
@@ -503,18 +665,20 @@ class Loader3DTiles {
           pointcloudUniforms.alpha.value = alpha;
         },
         getLatLongHeightFromPosition: (position) => {
-          const cartographicPosition = tileset.ellipsoid.cartesianToCartographic(
-            new Vector3().copy(position).applyMatrix4(new Matrix4().copy(threeMat).invert()).toArray(),
-          );
-          return {
-            lat: cartographicPosition[1],
-            long: cartographicPosition[0],
-            height: cartographicPosition[2],
-          };
+        //   const cartographicPosition = tileset.ellipsoid.cartesianToCartographic(
+        //     new Vector3().copy(position).applyMatrix4(new Matrix4().copy(threeMat).invert()).toArray(),
+        //   );
+        //   return {
+        //     lat: cartographicPosition[1],
+        //     long: cartographicPosition[0],
+        //     height: cartographicPosition[2],
+        //   };
+        return null;
         },
         getPositionFromLatLongHeight: (coord) => {
-          const cartesianPosition = tileset.ellipsoid.cartographicToCartesian([coord.long, coord.lat, coord.height]);
-          return new Vector3(...cartesianPosition).applyMatrix4(threeMat);
+        //   const cartesianPosition = tileset.ellipsoid.cartographicToCartesian([coord.long, coord.lat, coord.height]);
+        //   return new Vector3(...cartesianPosition).applyMatrix4(threeMat);
+        return null;
         },
         getCameraFrustum: (camera: Camera) => {
           const frustum = Util.getCameraFrustum(camera);
@@ -533,43 +697,43 @@ class Loader3DTiles {
 
           timer += dt;
 
-          if (tileset && timer >= UPDATE_INTERVAL) {
-            if (!lastRootTransform.equals(root.matrixWorld)) {
-              timer = 0;
-              lastRootTransform.copy(root.matrixWorld);
-              updateResetTransform();
+          // if (tileset && timer >= UPDATE_INTERVAL) {
+          //   // if (!lastRootTransform.equals(root.matrixWorld)) {
+          //   //   timer = 0;
+          //   //   lastRootTransform.copy(root.matrixWorld);
+          //   //   updateResetTransform();
 
-              const rootCenter = new Vector3().setFromMatrixPosition(lastRootTransform);
-              pointcloudUniforms.rootCenter.value.copy(rootCenter);
-              pointcloudUniforms.rootNormal.value.copy(new Vector3(0, 0, 1).applyMatrix4(lastRootTransform).normalize());
-              rootTransformInverse.copy(lastRootTransform).invert(); 
+          //   //   const rootCenter = new Vector3().setFromMatrixPosition(lastRootTransform);
+          //   //   pointcloudUniforms.rootCenter.value.copy(rootCenter);
+          //   //   pointcloudUniforms.rootNormal.value.copy(new Vector3(0, 0, 1).applyMatrix4(lastRootTransform).normalize());
+          //   //   rootTransformInverse.copy(lastRootTransform).invert(); 
 
-              if (options.debug) {
-                boxMap[tileset.root.id].matrixWorld.copy(threeMat);
-                boxMap[tileset.root.id].applyMatrix4(lastRootTransform);
-              }
-            }
+          //   //   if (options.debug) {
+          //   //     boxMap[tileset.root.id].matrixWorld.copy(threeMat);
+          //   //     boxMap[tileset.root.id].applyMatrix4(lastRootTransform);
+          //   //   }
+          //   // }
 
-            if (lastCameraTransform == null) {
-              lastCameraTransform = new Matrix4().copy(camera.matrixWorld);
-            } else {
-              const cameraChanged: boolean =
-                !camera.matrixWorld.equals(lastCameraTransform) ||
-                !((<PerspectiveCamera>camera).aspect == lastCameraAspect);
+          //   if (lastCameraTransform == null) {
+          //     lastCameraTransform = new Matrix4().copy(camera.matrixWorld);
+          //   } else {
+          //     const cameraChanged: boolean =
+          //       !camera.matrixWorld.equals(lastCameraTransform) ||
+          //       !((<PerspectiveCamera>camera).aspect == lastCameraAspect);
 
-              if (cameraChanged) {
-                timer = 0;
-                tileset._frameNumber++;
-                camera.getWorldPosition(lastCameraPosition);
-                lastCameraTransform.copy(camera.matrixWorld);
-                tilesetUpdate(tileset, renderMap, renderer, camera);
-              }
-            }
-          }
+          //     if (cameraChanged) {
+          //       timer = 0;
+          //       tileset._frameNumber++;
+          //       camera.getWorldPosition(lastCameraPosition);
+          //       lastCameraTransform.copy(camera.matrixWorld);
+          //       tilesetUpdate(tileset, renderMap, renderer, camera);
+          //     }
+          //   }
+          // }
         },
         dispose: function () {
-          disposeFlag = true;
-          tileset._destroy();
+          // disposeFlag = true;
+          // tileset._destroy();
           while (root.children.length > 0) {
             const obj = root.children[0];
             disposeNode(obj);
@@ -738,4 +902,4 @@ function disposeNode(node) {
   }
 }
 
-export { Loader3DTiles, PointCloudColoring, Shading, Runtime, GeoCoord, GeoTransform, LoaderOptions, LoaderProps };
+export { Loader3DTiles, LoaderLAS, PointCloudColoring, Shading, Runtime, GeoCoord, GeoTransform, LoaderOptions, LoaderProps };
